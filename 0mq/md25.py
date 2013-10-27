@@ -292,7 +292,7 @@ class Md25(robot.Robot):
             
     def update(self):
         b = self._send(-1,0)   # returns byte array of registers 0-15
-        print b
+        #print b
         bump   = 0
         ir0    = 0
         ir1    = 0
