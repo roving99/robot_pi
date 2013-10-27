@@ -18,8 +18,7 @@ MD25_ACCELERATE= 14
 MD25_MODE     = 15
 MD25_COMMAND  = 16
 
-
-
+MD25_ADDRESS = 0x5A
 
 emptySet =    {"ir": [0,0],
                "sonar": [0,0],
@@ -57,7 +56,6 @@ class Md25(robot.Robot):
                        }
         
         self.i2c = smbus.SMBus(1)
-        self.md25Addr = 0xBA
         self.name = "md25"              # robot name
         self.version = "0.5"            # version number    
         self.startTime = time.time()    # mission time
@@ -90,10 +88,10 @@ class Md25(robot.Robot):
         All messages to i2c go via this method.
         """
         if register<0:
-            output = self.i2c.read_i2c_block_data(self.md25Addr, 0, 16)
+            output = self.i2c.read_i2c_block_data(MD25_ADDRESS, 0, 16)
             return output
         else:
-            output = self.i2c.write_byte_data(self.md25Addr, register, data)
+            output = self.i2c.write_byte_data(MD25_ADDRESS, register, data)
             return output
 
     def close(self):
@@ -294,7 +292,7 @@ class Md25(robot.Robot):
             
     def update(self):
         b = self._send(-1,0)   # returns byte array of registers 0-15
-        print "["+b+"]"
+        print b
         bump   = 0
         ir0    = 0
         ir1    = 0
@@ -304,8 +302,10 @@ class Md25(robot.Robot):
         s4     = 0
         sp1    = b[MD25_SPEED]
         sp2    = b[MD25_ROTATE]
-        count1 = b[MD25_ENCODER1]<<24 + b[MD25_ENCODER1+1]<<16 + b[MD25_ENCODER1+2]<<8 + b[MD25_ENCODER1+3] 
-        count2 = b[MD25_ENCODER2]<<24 + b[MD25_ENCODER2+1]<<16 + b[MD25_ENCODER2+2]<<8 + b[MD25_ENCODER2+3] 
+        count1 = (b[MD25_ENCODER1]<<24) + (b[MD25_ENCODER1+1]<<16) + (b[MD25_ENCODER1+2]<<8) + b[MD25_ENCODER1+3] 
+        count2 = (b[MD25_ENCODER2]<<24) + (b[MD25_ENCODER2+1]<<16) + (b[MD25_ENCODER2+2]<<8) + b[MD25_ENCODER2+3] 
+        if count1>((1<<31)-1): count1-=(1<<32)
+        if count2>((1<<31)-1): count2-=(1<<32)
         volts  = float(b[MD25_VOLTS])/10.0
         compass= 0.0
         bearing= 0.0
