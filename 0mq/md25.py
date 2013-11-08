@@ -5,6 +5,9 @@ import time, platform, array
 import math
 import smbus
 import time
+import wii
+import sonar
+import bumpers
 
 MD25_SPEED    = 0
 MD25_ROTATE   = 1
@@ -21,15 +24,16 @@ MD25_COMMAND  = 16
 MD25_ADDRESS = 0x5A
 
 emptySet =    {"ir": [0,0],
-               "sonar": [0,0],
-               "bump": [0,0],
-               "cliff": [0,0] ,
-               "battery": [0],
+               "sonar": [0,0,0,0],
+               "bump": [False,False],
+               "cliff": [False,False] ,
+               "battery": [0.0],
                "pose": [0.0, 0.0, 0.0],
                'compass':[0.00],
                "count":[0,0],
                "motion":[0.0,0.0],
                "time":[0.0],
+               "camera":[None, None, None, None],
                }
 
 class Md25(robot.Robot):
@@ -41,21 +45,27 @@ class Md25(robot.Robot):
         robot.Robot.__init__(self)
 
         self.robotinfo = {'robot': ['md25'],
-                          'robot-version': ['0.1'],
+                          'robot-version': ['0.2'],
                           }
         self.sensor = {"ir": [1,2],
                        "sonar": [1,2,3,4],
-                       "bump": [5,6],
-                       "cliff": [7,8] ,
+                       "bump": [False,False],
+                       "cliff": [False,False] ,
                        "battery": [9],
                        "pose": [4.0, 2.0, 0.5],
                        'compass':[0.25],
                        "count":[0,0],
                        "motion":[0.0,0.0],
                        "time":[0.0],
+                       "camera":[None, None, None, None],
                        }
         
         self.i2c = smbus.SMBus(1)
+        
+        self.wii = wii.Wii(self.i2c)
+        self.sonar = sonar.Sonar(self.i2c)
+        self.bumpers = bumpers.Bumpers()
+
         self.name = "md25"              # robot name
         self.version = "0.5"            # version number    
         self.startTime = time.time()    # mission time
@@ -217,7 +227,7 @@ class Md25(robot.Robot):
            self.update()                  # Update sensor values
         sensor = sensor.lower()                 
         if sensor == "config":                  # return number and types of sensors
-            return {"ir": 1, "sonar":2, "bump":2, "cliff":2, "battery":1, "compass":1, "pose":3, "count":2, "time":1}
+            return {"ir": 2, "sonar":4, "bump":2, "cliff":2, "battery":1, "compass":1, "pose":3, "count":2, "time":1, "camera":4}
         elif sensor == "name":                  # robot name
             return self.name
         else:
@@ -226,7 +236,7 @@ class Md25(robot.Robot):
                 if sensor == "ir":
                     return self.get("ir", False, 0, 1)
                 elif sensor == "sonar":             # 'elif' checks multiple blocks of 'elif's and on running a matching block, proceeds to 'else' ..
-                    return self.get("sonar", False, 0, 1)
+                    return self.get("sonar", False, 0, 1, 3)
                 elif sensor == "bump":
                     return self.get("bump", False, 0, 1)
                 elif sensor == "cliff":
@@ -243,6 +253,8 @@ class Md25(robot.Robot):
                     return self.get("motion", False, 0, 1)
                 elif sensor == "time":
                     return self.get("time", False, 0)
+                elif sensor == "camera":
+                    return self.get("camera", False, 0, 1, 2, 3)
                 
                 elif sensor == "all":           # 'all' returns all sensors, all positions
                     return {"ir"     : self.get("ir", False), 
@@ -255,6 +267,7 @@ class Md25(robot.Robot):
                             "count"  : self.get("count", False), 
                             "motion" : self.get("motion", False), 
                             "time"   : self.get("time", False), 
+                            "camera" : self.get("camera", False), 
 			    }
                 else:
                     raise ("invalid sensor name: '%s'" % sensor)
@@ -283,6 +296,8 @@ class Md25(robot.Robot):
                     retvals.append(self._getMotion(position))
                 elif sensor == "time":
                     retvals.append(self._getTime(position))
+                elif sensor == "camera":
+                    retvals.append(self._getCamera(position))
                 else:
                     raise ("invalid sensor name: '%s'" % sensor)
             if len(retvals) == 1:
@@ -292,14 +307,6 @@ class Md25(robot.Robot):
             
     def update(self):
         b = self._send(-1,0)   # returns byte array of registers 0-15
-        #print b
-        bump   = 0
-        ir0    = 0
-        ir1    = 0
-        s1     = 0
-        s2     = 0
-        s3     = 0
-        s4     = 0
         sp1    = b[MD25_SPEED]
         sp2    = b[MD25_ROTATE]
         count1 = (b[MD25_ENCODER1]<<24) + (b[MD25_ENCODER1+1]<<16) + (b[MD25_ENCODER1+2]<<8) + b[MD25_ENCODER1+3] 
@@ -311,10 +318,15 @@ class Md25(robot.Robot):
         bearing= 0.0
         x      = 0.0
         y      = 0.0
-        self.sensor['bump']   = [(bump>>4)&1,(bump>>5)&1]
-        self.sensor['cliff']   = [(bump>>6)&1,(bump>>7)&1]
-        self.sensor['ir']     = [ir0, ir1]
-        self.sensor['sonar']  = [s1, s2, s3, s4]
+        self.sonar.update()
+        self.wii.update()
+        self.bumpers.update()
+
+        self.sensor['bump']   = [self.bumpers.data[0],self.bumpers.data[1]]
+        self.sensor['cliff']   = [self.bumpers.data[2],self.bumpers.data[3]]
+        self.sensor['ir']     = [0, 0]
+        self.sensor['sonar']  = self.sonar.data
+        self.sensor['camera']  = self.wii.data
         self.sensor['count']  = [count1, count2]
         self.sensor['battery']= [volts]
         self.sensor['compass']= [compass]
@@ -323,17 +335,15 @@ class Md25(robot.Robot):
         self.sensor['motion']   = [self.getTranslate(), self.getRotate()]
         self.sensor['time']   = self._getTime(0)
 
-    def updateBumpAndCliff(self):
-        #b = self._send()
-        raise ("updateBumpAndCliff not implemented")
-        pass
-
 # _REALLY_ GET SENSOR DATA =============================================================================
     def _getIR(self, position):
         return self.sensor['ir'][position]
 
     def _getSonar(self, position):
         return self.sensor['sonar'][position]
+
+    def _getCamera(self, position):
+        return self.sensor['camera'][position]
 
     def _getBump(self, position):
         #self.updateBumpAndCliff()
@@ -363,6 +373,4 @@ class Md25(robot.Robot):
 
     def _getTime(self, position):
         return [int(1000*(time.time()-self.startTime))/1000.0]
-
-######################################################
 

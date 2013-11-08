@@ -1,4 +1,5 @@
-# 0MZ server - gets data from md25 robot and servers on 5557
+#!/usr/bin/python
+# 0MQ server - gets data from md25 robot and servers on 5557
 
 import zmq
 import random

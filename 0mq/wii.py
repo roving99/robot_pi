@@ -11,50 +11,56 @@ size = 1-15?
 top right of scene = [0,0]
 
 '''
+class Wii():
+    def __init__(self, i2c):
+        self.i2c = i2c
+        self.data = [None, None, None, None]
+        self.addr = 0x58
 
-def getBlob(n,list):	# return x,y,size for blob n (0-3) from list
-    if len(list)<13:
-        return []
-    x = list[1+(n*3)]
-    y = list[2+(n*3)]
-    s = list[3+(n*3)]
-    x += (s&0x30)<<4
-    y += (s&0xC0)<<2
-    s = s&0x0F
-    if x==1023:
-       return None
-    else:
-       return [x,y,s]
+        self.i2c.write_byte_data(self.addr, 0x30,0x01)
+        time.sleep(0.05)
+        self.i2c.write_byte_data(self.addr, 0x30,0x08)
+        time.sleep(0.05)
+        self.i2c.write_byte_data(self.addr, 0x06,0x90)
+        time.sleep(0.05)
+        self.i2c.write_byte_data(self.addr, 0x08,0xC0)
+        time.sleep(0.05)
+        self.i2c.write_byte_data(self.addr, 0x1A,0x40)
+        time.sleep(0.05)
+        self.i2c.write_byte_data(self.addr, 0x33,0x33)
+        time.sleep(0.05)
 
-def init(bus):
-    i2c.write_byte_data(wiiAddr, 0x30,0x01)
-    time.sleep(0.05)
-    i2c.write_byte_data(wiiAddr, 0x30,0x08)
-    time.sleep(0.05)
-    i2c.write_byte_data(wiiAddr, 0x06,0x90)
-    time.sleep(0.05)
-    i2c.write_byte_data(wiiAddr, 0x08,0xC0)
-    time.sleep(0.05)
-    i2c.write_byte_data(wiiAddr, 0x1A,0x40)
-    time.sleep(0.05)
-    i2c.write_byte_data(wiiAddr, 0x33,0x33)
-    time.sleep(0.05)
+    def update(self):
+        self.data = self.get()
 
-def get(bus):
-    data = i2c.read_i2c_block_data(wiiAddr, 0x36, 16)
-    out = [ getBlob(0,data), getBlob(1,data), getBlob(2,data), getBlob(3,data) ] 
-    return out
+    def get(self):
+        data = self.i2c.read_i2c_block_data(self.addr, 0x36, 16)
+        out = [ self.getBlob(0,data), self.getBlob(1,data), self.getBlob(2,data), self.getBlob(3,data) ] 
+        return out
 
-wiiAddr = 0x58
+    def getBlob(self,n,list):	# return x,y,size for blob n (0-3) from list
+        if len(list)<13:
+            return []
+        x = list[1+(n*3)]
+        y = list[2+(n*3)]
+        s = list[3+(n*3)]
+        x += (s&0x30)<<4
+        y += (s&0xC0)<<2
+        s = s&0x0F
+        if x==1023:
+           return None
+        else:
+           return [x,y,s]
+
 
 if __name__=="__main__":
 
     i2c = smbus.SMBus(1)
-    init(i2c)
+    wii = Wii(i2c)
 
     while 1:
         t = time.time()
-        data = get(i2c)
+        wii.update()
         print time.time()-t
-        print data
+        print wii.data
         time.sleep(1)
