@@ -37,4 +37,4 @@ if __name__=="__main__":
         sonar.update()
 	print sonar.data
         print time.time()-t
-        time.sleep(1.0)
+        time.sleep(.1)

@@ -44,6 +44,12 @@ class Md25(robot.Robot):
         """
         robot.Robot.__init__(self)
 
+        self.wheel_spacing=22.4		# cm 
+        self.wheel_circumference=32.55	# cm	
+        self.wheel_counts_per_rev = 360.0	# 
+        self.cm_per_tick = (self.wheel_circumference/self.wheel_counts_per_rev)
+        self.full_circle =  self.wheel_counts_per_rev*((self.wheel_spacing*math.pi)/self.wheel_circumference)
+
         self.robotinfo = {'robot': ['md25'],
                           'robot-version': ['0.2'],
                           }
@@ -76,6 +82,14 @@ class Md25(robot.Robot):
 
         self._lastTranslate = 0.0
         self._lastRotate = 0.0
+        self.last_encoder1 = 0
+        self.last_encoder2 = 0
+        self.encoder1 = 0
+        self.encoder2 = 0
+        self.x = 0
+        self.y = 0
+        self.theta = 0.0
+        self.reset()
     
     def info(self):
         return self.robotinfo
@@ -84,14 +98,49 @@ class Md25(robot.Robot):
         """
         reset robot. zero location.
         """
-        cmd = raw_input("Press reset button on robot, then press RETURN...")
-        if cmd != '':
-            print 'Aborted'
-            return
+	self._send(MD25_COMMAND, 0x20)		# reset counters
+	self._send(MD25_COMMAND, 0x31)		# set automatic speed regulation
+	self._send(MD25_MODE, 0x02)		# set mode to speed, turn. Centre = 128
         self._lastTranslate = 0
         self._lastRotate = 0
+        self.last_encoder1 = 0
+        self.last_encoder2 = 0
+        self.encoder1 = 0
+        self.encoder2 = 0
+
         print 'Robot ready'
-##
+
+
+    def position_update(self):       # calculate new X, Y, Theta 
+#        self.encoder1 = self.sensor['count'][0]
+#        self.encoder2 = self.sensor['count'][1]
+        left_ticks   = self.encoder1 - self.last_encoder1
+        right_ticks  = self.encoder2 - self.last_encoder2
+        self.last_encoder1 = self.encoder1
+        self.last_encoder2 = self.encoder2
+        
+        dist_left   = float(left_ticks) * self.cm_per_tick;
+        dist_right  = float(right_ticks) * self.cm_per_tick;
+        cos_current = math.cos(self.theta);
+        sin_current = math.sin(self.theta);
+        right_minus_left = dist_right-dist_left;
+#        expr1 = self.wheel_spacing * (dist_right + dist_left) / 2.0 / (dist_right - dist_left);
+             
+        if (left_ticks == right_ticks):            # Moving in a straight line 
+            self.x += dist_left*cos_current
+            self.y += dist_left*sin_current
+        else:                                      # Moving in an arc 
+            expr1 = self.wheel_spacing * (dist_right + dist_left) / 2.0 / (dist_right - dist_left);
+            right_minus_left = dist_right - dist_left
+            self.x     += expr1 * (math.sin(right_minus_left/self.wheel_spacing + self.theta) - sin_current)
+            self.y     += expr1 * (math.cos(right_minus_left/self.wheel_spacing + self.theta) - cos_current)
+            self.theta += right_minus_left / self.wheel_spacing
+            
+        if (self.theta<0.0):     
+            self.theta = (2*math.pi)+self.theta
+        if (self.theta>=(2*math.pi)):
+            self.theta = self.theta-(2*math.pi)
+
         
     def _send(self, register, data):                            #### ALL COMES TO GO THROUGH THIS CALL !! 
         """
@@ -236,7 +285,7 @@ class Md25(robot.Robot):
                 if sensor == "ir":
                     return self.get("ir", False, 0, 1)
                 elif sensor == "sonar":             # 'elif' checks multiple blocks of 'elif's and on running a matching block, proceeds to 'else' ..
-                    return self.get("sonar", False, 0, 1, 3)
+                    return self.get("sonar", False, 0, 1, 2, 3)
                 elif sensor == "bump":
                     return self.get("bump", False, 0, 1)
                 elif sensor == "cliff":
@@ -309,28 +358,27 @@ class Md25(robot.Robot):
         b = self._send(-1,0)   # returns byte array of registers 0-15
         sp1    = b[MD25_SPEED]
         sp2    = b[MD25_ROTATE]
-        count1 = (b[MD25_ENCODER1]<<24) + (b[MD25_ENCODER1+1]<<16) + (b[MD25_ENCODER1+2]<<8) + b[MD25_ENCODER1+3] 
-        count2 = (b[MD25_ENCODER2]<<24) + (b[MD25_ENCODER2+1]<<16) + (b[MD25_ENCODER2+2]<<8) + b[MD25_ENCODER2+3] 
-        if count1>((1<<31)-1): count1-=(1<<32)
-        if count2>((1<<31)-1): count2-=(1<<32)
+        self.encoder1 = (b[MD25_ENCODER1]<<24) + (b[MD25_ENCODER1+1]<<16) + (b[MD25_ENCODER1+2]<<8) + b[MD25_ENCODER1+3] 
+        self.encoder2 = (b[MD25_ENCODER2]<<24) + (b[MD25_ENCODER2+1]<<16) + (b[MD25_ENCODER2+2]<<8) + b[MD25_ENCODER2+3] 
+        if self.encoder1>((1<<31)-1): self.encoder1-=(1<<32)
+        if self.encoder2>((1<<31)-1): self.encoder2-=(1<<32)
         volts  = float(b[MD25_VOLTS])/10.0
         compass= 0.0
-        bearing= 0.0
-        x      = 0.0
-        y      = 0.0
+
         self.sonar.update()
         self.wii.update()
         self.bumpers.update()
+        self.position_update()
 
         self.sensor['bump']   = [self.bumpers.data[0],self.bumpers.data[1]]
         self.sensor['cliff']   = [self.bumpers.data[2],self.bumpers.data[3]]
         self.sensor['ir']     = [0, 0]
         self.sensor['sonar']  = self.sonar.data
         self.sensor['camera']  = self.wii.data
-        self.sensor['count']  = [count1, count2]
+        self.sensor['count']  = [self.encoder1, self.encoder2]
         self.sensor['battery']= [volts]
         self.sensor['compass']= [compass]
-        self.sensor['pose']   = [x, y, bearing]
+        self.sensor['pose']   = [self.x, self.y, self.theta]
 
         self.sensor['motion']   = [self.getTranslate(), self.getRotate()]
         self.sensor['time']   = self._getTime(0)
